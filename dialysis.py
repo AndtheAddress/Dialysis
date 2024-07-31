@@ -213,8 +213,11 @@ def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, col
         1, 
         1+len(cate), 
         gridspec_kw={"width_ratios":plot_ratio}, 
-        figsize=(chart_width*chart_num,4.8)
+        figsize=(chart_width*chart_num,4.8), 
+        sharey=True
     )
+    axes[0].set_ylim(0,100)
+    #如果不设置y轴范围和上面多图中的sharey参数，格式会变得不统一，有时100%刻度在y轴尽头，有时不在。
     axes[0].yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100))
     table.loc[1:,'All'] *= 100
     table.loc[1:,'All'] = table.loc[1:,'All'].map(lambda x: round(x, 1))
@@ -226,6 +229,7 @@ def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, col
             bottom=bottom_0, 
             color=cmap[C-1]
         )
+        axes[0].set_ylabel(f"{var}")
         axes[0].bar_label(bar, fmt='%g%%', label_type='center')
         bottom_0 += table.loc[C,'All']
     axes[0].spines[['top','right']].set_visible(False)
@@ -234,7 +238,8 @@ def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, col
         subgroups = list(dict.fromkeys([t[0] for t in series_index.index]))
         table.loc[1:,subgroups] *= 100
         table.loc[1:,subgroups] = table.loc[1:,subgroups].map(lambda x: round(x, 1))
-        axes[i].yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100))
+        #axes[i].yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100))
+        #在创建多图时规定了sharey，故此处弃用
         bottom_i = numpy.zeros(len(subgroups))
         for C in range(1,len(table)):
             bar = axes[i].bar(
