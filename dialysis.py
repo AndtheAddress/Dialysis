@@ -68,11 +68,11 @@ def dopps_chi2(var1,var2, data=base):
     #P值在pvalue属性中
 
 # 列定量数据的表格，正态数据->均值±标准差； 非正态数据->中位数、上下四分位数
-def table_quant(var, cate=['Region','Gender'], data=base):
+def table_quant(var, cate=['Region','Gender'], data=base, transform_age=True):
     if not isinstance(cate, list):
         cate = [cate]
     cut = data[[var,*cate]].dropna()
-    if 'Age' in cate:
+    if 'Age' in cate and transform_age:
         cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
     if stats.shapiro(cut[var]).pvalue>0.05:
         mean = round(cut[var].mean(), 1)
@@ -111,11 +111,11 @@ def table_quant(var, cate=['Region','Gender'], data=base):
     return table
 
 # 对定量数据绘图，提琴图
-def plot_quant(var, cate=['Region','Gender'], data=base):
+def plot_quant(var, cate=['Region','Gender'], data=base, transform_age=True):
     if not isinstance(cate, list):
         cate = [cate]
     cut = data[[var,*cate]].dropna()
-    if 'Age' in cate:
+    if 'Age' in cate and transform_age:
         cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
     plot_ratio = [1]
     chart_width = 12.8/11
@@ -176,7 +176,16 @@ def table_class(var, cate=['Region','Gender'], data=base, show_percent=True, tra
         subgroups = list(dict.fromkeys([t[0] for t in series_percent.index]))
         #转换成字典再转回来，以清除重复项同时保持顺序
         for subgroup in subgroups:
-            table[subgroup] = [" ", *series_percent[subgroup]]
+            #table[subgroup] = ["", *series_percent[subgroup]]
+            #这样有时会出现某些类别占比为0，不计入value_count()的输出，无法将表中对应列填满。
+            #报错：Length of values does not match length of index
+            series_copy = list(series_percent[subgroup].index)
+            for i,indexname in enumerate(percent.index):
+                if indexname not in series_copy:
+                    series_copy.insert(i,0)
+                else:
+                    series_copy[i] = series_percent[subgroup][indexname]
+            table.loc[:,subgroup] = ["", *series_copy]
             if show_percent:
                 table.loc[1:,subgroup] = table.loc[1:,subgroup].map(lambda per: f"{per}%")
         pvalue = dopps_chi2(group, var, data=cut).pvalue
@@ -186,11 +195,11 @@ def table_class(var, cate=['Region','Gender'], data=base, show_percent=True, tra
     return table
 
 # 对定序数据绘图，百分比堆积柱状图
-def plot_class(var, cate=['Region','Gender'], data=base, colormap='Set3'):
+def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, colormap='Set3'):
     if not isinstance(cate, list):
         cate = [cate]
     cut = data[[var,*cate]].dropna()
-    if 'Age' in cate:
+    if 'Age' in cate and transform_age:
         cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
     table = table_class(var, cate=cate, data=cut, show_percent=False, transform_age=False)
     plot_ratio = [1]
@@ -235,9 +244,49 @@ def plot_class(var, cate=['Region','Gender'], data=base, colormap='Set3'):
                 color=cmap[C-1], 
                 label=table.iloc[C,0]
             )
-            axes[i].bar_label(bar, fmt='%g%%', label_type='center')
+            b_label = axes[i].bar_label(bar, fmt='%g%%', label_type='center')
+            for bl in b_label:
+                if bl.get_text()=='0%':
+                    bl.set_visible(False)
             bottom_i += table.loc[C,subgroups]
         axes[i].yaxis.set_visible(False)
         axes[i].spines[['left','right','top']].set_visible(False)
     pyplot.legend(bbox_to_anchor=(1,1))
     pyplot.show()
+    
+# 输出整合的表格和图
+# multi_var是嵌套的列表，形如[[],[],[]]。内层列表包含相同种类的数据。
+# seq是形如[1,0,0]或[True,False,False]的列表，指示multi_var中每个内层列表是何种数据。
+# 1和True代表定序数据，0和False代表定量数据。
+def multichart(multi_var, seq, cate=['Region','Gender'], data=base, ifplot=True, transform_age=True):
+    if not isinstance(multi_var, list):
+        multi_var = [[multi_var]]
+    if not isinstance(multi_var[0], list):
+        multi_var = [multi_var]
+    if not isinstance(seq, list):
+        seq = [seq]
+    if not isinstance(cate, list):
+        cate = [cate]
+    plain_var = []
+    for var in multi_var:
+        plain_var += var
+    cut = data[[*plain_var,*cate]].dropna()
+    if 'Age' in cate and transform_age:
+        cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
+    chart_list=[]
+    for index,var in enumerate(multi_var):
+        subchart_list = []
+        if seq[index]:
+            for single_var in var:
+                subchart_list.append(table_class(single_var, cate=cate, data=cut, transform_age=False))
+                if ifplot:
+                    plot_class(single_var, cate=cate, data=cut, transform_age=False)
+        else:
+            for single_var in var:
+                subchart_list.append(table_quant(single_var, cate=cate, data=cut, transform_age=False))
+                if ifplot:
+                    plot_quant(single_var, cate=cate, data=cut, transform_age=False)
+        subchart = pandas.concat(subchart_list, ignore_index=True)
+        chart_list.append(subchart)
+    chart = pandas.concat(chart_list, ignore_index=True)
+    return chart
