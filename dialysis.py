@@ -68,7 +68,11 @@ def dopps_chi2(var1,var2, data=base):
     #P值在pvalue属性中
 
 # 列定量数据的表格，正态数据->均值±标准差； 非正态数据->中位数、上下四分位数
-def table_quant(var, cate=['Region','Gender'], data=base, transform_age=True):
+# var是要分析的变量名，接收一个字符串。cate是用于分类的变量，接收一个列表，只有一个分类变量时可以使用字符串。
+# data是要使用的数据集，需要提前存入一个变量中。
+# transform_age规定是否将定量的年龄转化为定序的年龄区间。会把原数据覆盖。
+# chow_count规定是否在表顶端加上总样本量的计数。
+def table_quant(var, cate=['Region','Gender'], data=base, transform_age=True, show_count=False):
     if not isinstance(cate, list):
         cate = [cate]
     cut = data[[var,*cate]].dropna()
@@ -108,6 +112,9 @@ def table_quant(var, cate=['Region','Gender'], data=base, transform_age=True):
                 table[subgroup] = f"{curr_median} ({curr_q1}, {curr_q3})"
             pvalue = dopps_ols(group, var, summary=False, data=cut).f_pvalue
             table[f"P_{group}"] = round(pvalue, 4) if pvalue>0.0001 else '<0.0001'
+    if show_count:
+        table0 = table_count(var, cate=cate, data=cut, transform_age=transform_age)
+        table = pandas.concat([table0, table], ignore_index=True)
     return table
 
 # 对定量数据绘图，提琴图
@@ -156,11 +163,12 @@ def plot_quant(var, cate=['Region','Gender'], data=base, transform_age=True):
     pyplot.show()
 
 # 列定序数据的表格
-def table_class(var, cate=['Region','Gender'], data=base, show_percent=True, transform_age=True):
+# show_percent规定是否将0~1的比值转化为0~100%的百分数字符串。
+def table_class(var, cate=['Region','Gender'], data=base, show_percent=True, transform_age=True, show_count=False):
     if not isinstance(cate, list):
         cate = [cate]
     cut = data[[var,*cate]].dropna()
-    if 'Age' in cate and transform_age:
+    if ('Age' in cate or var=='Age') and transform_age:
         cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
     percent = cut[var].value_counts(normalize=True).sort_index()
     if show_percent:
@@ -192,14 +200,19 @@ def table_class(var, cate=['Region','Gender'], data=base, show_percent=True, tra
         pvalue = round(pvalue, 4) if pvalue>0.0001 else '<0.0001'
         table[f"P_{group}"] = ''
         table.loc[0,f"P_{group}"] = pvalue
+    if show_count:
+        table0 = table_count(var, cate=cate, data=cut, transform_age=transform_age)
+        table = pandas.concat([table0, table], ignore_index=True)
     return table
 
 # 对定序数据绘图，百分比堆积柱状图
-def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, colormap='Set3'):
+# colormap是默认色盘（离散），当定序数据的类别不是特别多时使用。
+# alter_color是备选色盘（连续），当colormap包含的颜色种类不够时会用该色盘替代。
+def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, colormap='Set3', alter_color='summer'):
     if not isinstance(cate, list):
         cate = [cate]
     cut = data[[var,*cate]].dropna()
-    if 'Age' in cate and transform_age:
+    if ('Age' in cate or var=='Age') and transform_age:
         cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
     table = table_class(var, cate=cate, data=cut, show_percent=False, transform_age=False)
     plot_ratio = [1]
@@ -223,12 +236,22 @@ def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, col
     table.loc[1:,'All'] = table.loc[1:,'All'].map(lambda x: round(x, 1))
     bottom_0 = 0
     for C in range(1,len(table)):
-        bar = axes[0].bar(
-            x='All', 
-            height=table.loc[C,'All'], 
-            bottom=bottom_0, 
-            color=cmap[C-1]
-        )
+        if (num_group := len(cut[var].unique()))>=len(cmap):
+            alter_cmap = matplotlib.colormaps[alter_color]
+            alter_colors = alter_cmap(numpy.linspace(0,1,num_group))
+            bar = axes[0].bar(
+                x='All', 
+                height=table.loc[C,'All'], 
+                bottom=bottom_0, 
+                color=alter_colors[C-1]
+            )
+        else:
+            bar = axes[0].bar(
+                x='All', 
+                height=table.loc[C,'All'], 
+                bottom=bottom_0, 
+                color=cmap[C-1]
+            )
         axes[0].set_ylabel(f"{var}")
         axes[0].bar_label(bar, fmt='%g%%', label_type='center')
         bottom_0 += table.loc[C,'All']
@@ -242,13 +265,25 @@ def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, col
         #在创建多图时规定了sharey，故此处弃用
         bottom_i = numpy.zeros(len(subgroups))
         for C in range(1,len(table)):
-            bar = axes[i].bar(
-                x=subgroups, 
-                height=table.loc[C,subgroups], 
-                bottom=bottom_i, 
-                color=cmap[C-1], 
-                label=table.iloc[C,0]
-            )
+            if (num_subgroup := len(cut[var].unique()))>=len(cmap):
+                alter_cmap = matplotlib.colormaps[alter_color]
+                alter_colors = alter_cmap(numpy.linspace(0,1,num_subgroup))
+                bar = axes[i].bar(
+                    x=subgroups, 
+                    height=table.loc[C,subgroups], 
+                    bottom=bottom_i, 
+                    color=alter_colors[C-1], 
+                    label=table.iloc[C,0]
+                )
+            else:
+                
+                bar = axes[i].bar(
+                    x=subgroups, 
+                    height=table.loc[C,subgroups], 
+                    bottom=bottom_i, 
+                    color=cmap[C-1], 
+                    label=table.iloc[C,0]
+                )
             b_label = axes[i].bar_label(bar, fmt='%g%%', label_type='center')
             for bl in b_label:
                 if bl.get_text()=='0%':
@@ -258,12 +293,37 @@ def plot_class(var, cate=['Region','Gender'], data=base, transform_age=True, col
         axes[i].spines[['left','right','top']].set_visible(False)
     pyplot.legend(bbox_to_anchor=(1,1))
     pyplot.show()
-    
+
+# 创建表格最顶端的两行计数
+def table_count(var, cate=['Region','Gender'], data=base, transform_age=True):
+    if not isinstance(cate, list):
+        cate = [cate]
+    if not isinstance(var, list):
+        var = [var]
+    cut0 = base[cate].dropna()
+    cut1 = data[[*var,*cate]].dropna()
+    if 'Age' in cate and transform_age:
+        cut0['Age'] = pandas.cut(cut0['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
+    total_len,initial_len = len(cut0),len(cut1)
+    table = pandas.DataFrame({
+        'Variables':['Sample patients','Initial sample patients'], 
+        'All':[total_len,initial_len]
+    })
+    for group in cate:
+        total_count = cut0[group].value_counts().sort_index()
+        table.loc[0,total_count.index] = total_count
+        table.loc[1,total_count.index] = 0
+        initial_count = cut1[group].value_counts().sort_index()
+        table.loc[1,initial_count.index] = initial_count
+        table.loc[:,f"P_{group}"] = ""
+    return table
+
 # 输出整合的表格和图
 # multi_var是嵌套的列表，形如[[],[],[]]。内层列表包含相同种类的数据。
 # seq是形如[1,0,0]或[True,False,False]的列表，指示multi_var中每个内层列表是何种数据。
 # 1和True代表定序数据，0和False代表定量数据。
-def multichart(multi_var, seq, cate=['Region','Gender'], data=base, ifplot=True, transform_age=True):
+# ifplot规定是否对数据作描述性图，若为True，会对multi_var包含的全部变量依次作图。
+def multichart(multi_var, seq, cate=['Region','Gender'], data=base, ifplot=False, transform_age=True, show_count=True):
     if not isinstance(multi_var, list):
         multi_var = [[multi_var]]
     if not isinstance(multi_var[0], list):
@@ -276,7 +336,7 @@ def multichart(multi_var, seq, cate=['Region','Gender'], data=base, ifplot=True,
     for var in multi_var:
         plain_var += var
     cut = data[[*plain_var,*cate]].dropna()
-    if 'Age' in cate and transform_age:
+    if ('Age' in cate or 'Age' in plain_var) and transform_age:
         cut['Age'] = pandas.cut(cut['Age'], bins=[0,45,55,65,75,95], right=False, labels=['<45','45-54','55-64','65-74','≥75'])
     chart_list=[]
     for index,var in enumerate(multi_var):
@@ -294,4 +354,7 @@ def multichart(multi_var, seq, cate=['Region','Gender'], data=base, ifplot=True,
         subchart = pandas.concat(subchart_list, ignore_index=True)
         chart_list.append(subchart)
     chart = pandas.concat(chart_list, ignore_index=True)
+    if show_count:
+        table0 = table_count(plain_var, cate=cate, data=cut, transform_age=transform_age)
+        chart = pandas.concat([table0, chart], ignore_index=True)
     return chart
